@@ -5,7 +5,6 @@ use bodypix::*;
 use image_utils::*;
 
 use nannou::image::io::Reader as ImageReader;
-use nannou::math::cgmath::{Matrix4, SquareMatrix};
 use nannou::prelude::*;
 use nannou::wgpu::Texture;
 
@@ -58,22 +57,14 @@ fn model<'a>(app: &App) -> Model {
 
 fn update(_app: &App, _model: &mut Model, _update: Update) {}
 
-fn mirror_mat() -> Matrix4<f32> {
-    let mut matrix: Matrix4<f32> = Matrix4::identity();
-    matrix[0][0] = -1.;
-    matrix
-}
-
 fn view(app: &App, model: &Model, frame: Frame) {
     frame.clear(DIMGREY);
     let draw = app.draw();
-    let mirror: Matrix4<f32> = mirror_mat();
 
     match &model.mask_texture {
         Some(m) => {
             draw.scale(0.75)
                 .x_y(335., 260.)
-                .transform(mirror)
                 .texture(&m);
             ()
         }
@@ -84,7 +75,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         Some(i) => {
             draw.scale(0.75)
                 .x_y(-335., 260.)
-                .transform(mirror)
                 .texture(&i);
             ()
         }
@@ -95,7 +85,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         Some(m) => {
             draw.scale(0.75)
                 .x_y(335., -260.)
-                .transform(mirror)
                 .texture(&m);
             ()
         }
@@ -106,7 +95,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         Some(i) => {
             draw.scale(0.75)
                 .x_y(-335., -260.)
-                .transform(mirror)
                 .texture(&i);
             ()
         }

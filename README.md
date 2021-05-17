@@ -20,3 +20,9 @@ Run `pip install tfjs_graph_converter` to install the tool that you can use to
  convert body-pix to a frozen model.
 
 To convert, run: `tfjs_graph_converter ./path/to/model/ output_model.pb`
+
+## Thanks
+A big shout-out to Ajai Chemmanam (ajaichemmanam on Github), and his
+ simple_bodypix_python project. I owe my understanding of how to massage the
+ input and output to improve prediction to this project. (Which I have been
+ tinkering with a lot.)
