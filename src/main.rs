@@ -1,12 +1,12 @@
 mod bodypix;
+mod image_utils;
 
 use bodypix::*;
+use image_utils::*;
 
 use nannou::image::io::Reader as ImageReader;
 use nannou::math::cgmath::{Matrix4, SquareMatrix};
 use nannou::prelude::*;
-use nannou::ui::color::WHITE;
-use nannou::ui::prelude::*;
 use nannou::wgpu::Texture;
 
 use tensorflow::{Session, SessionOptions};
@@ -17,23 +17,14 @@ fn main() {
 }
 
 struct Model {
-    ui: Ui,
-    ids: Ids,
-
     image_texture: Option<Texture>,
     mask_texture: Option<Texture>,
-}
-
-widget_ids! {
-    struct Ids {
-        button,
-    }
+    silhouette_texture: Option<Texture>,
+    cutout_texture: Option<Texture>,
 }
 
 fn model<'a>(app: &App) -> Model {
-    let mut ui = app.new_ui().build().unwrap();
-    app.set_loop_mode(LoopMode::RefreshSync);
-    let ids = Ids::new(ui.widget_id_generator());
+    app.set_loop_mode(LoopMode::Wait);
 
     let (mut graph, stride) = load_bodypix_model(app.assets_path().unwrap());
     let mut session = Session::new(&SessionOptions::new(), &graph).unwrap();
@@ -47,40 +38,25 @@ fn model<'a>(app: &App) -> Model {
     .unwrap()
     .decode()
     .unwrap();
-    let mask_image = image_to_mask(&mut graph, &mut session, &test_image, stride);
+    let mask = image_to_mask(&mut graph, &mut session, &test_image, stride);
+    let mask_image = mask_to_image(&mask);
+    let silhouette_image = create_silhouette(&mask, &test_image);
+    let cutout_image = create_cutout(&mask, &test_image);
 
     let image_texture = Some(Texture::from_image(app, &test_image));
     let mask_texture = Some(Texture::from_image(app, &mask_image));
+    let silhouette_texture = Some(Texture::from_image(app, &silhouette_image));
+    let cutout_texture = Some(Texture::from_image(app, &cutout_image));
 
     Model {
-        ui,
-        ids,
-
         image_texture,
         mask_texture,
+        silhouette_texture,
+        cutout_texture,
     }
 }
 
-fn update(_app: &App, model: &mut Model, _update: Update) {
-    let Model {
-        ref mut ui, ids, ..
-    } = model;
-
-    let ui = &mut ui.set_widgets();
-
-    if widget::Button::new()
-        .top_left()
-        .w_h(200.0, 30.0)
-        .border(0.0)
-        .color(WHITE)
-        .label("Click")
-        .label_font_size(15)
-        .set(ids.button, ui)
-        .was_clicked()
-    {
-        println!("Click!");
-    }
-}
+fn update(_app: &App, _model: &mut Model, _update: Update) {}
 
 fn mirror_mat() -> Matrix4<f32> {
     let mut matrix: Matrix4<f32> = Matrix4::identity();
@@ -115,6 +91,27 @@ fn view(app: &App, model: &Model, frame: Frame) {
         None => (),
     }
 
+    match &model.silhouette_texture {
+        Some(m) => {
+            draw.scale(0.75)
+                .x_y(335., -260.)
+                .transform(mirror)
+                .texture(&m);
+            ()
+        }
+        None => (),
+    }
+
+    match &model.cutout_texture {
+        Some(i) => {
+            draw.scale(0.75)
+                .x_y(-335., -260.)
+                .transform(mirror)
+                .texture(&i);
+            ()
+        }
+        None => (),
+    }
+
     draw.to_frame(app, &frame).unwrap();
-    model.ui.draw_to_frame(app, &frame).unwrap();
 }

@@ -5,8 +5,7 @@ use std::path::PathBuf;
 
 use tensorflow::{Graph, ImportGraphDefOptions, Session, SessionRunArgs, Tensor};
 
-use nannou::image;
-use nannou::image::{DynamicImage, GenericImageView, ImageBuffer, Pixel};
+use nannou::image::{DynamicImage, GenericImageView, Pixel};
 
 pub fn load_bodypix_model(assets_path: PathBuf) -> (Graph, u32) {
     let model_file = assets_path
@@ -55,7 +54,7 @@ pub fn image_to_mask(
     session: &mut Session,
     image: &DynamicImage,
     stride: u32,
-) -> DynamicImage {
+) -> Vec<Vec<u8>> {
     fn sigmoid(val: f32) -> f32 {
         let neg_val = -val;
         let denominator = 1. + neg_val.exp();
@@ -123,7 +122,7 @@ pub fn image_to_mask(
 
     let sig_map = sig_map;
     let half_stride = stride / 2;
-    let mean_sig = |x: u32, y: u32| -> f32 {
+    let mean_sig = |x: usize, y: usize| -> u8 {
         let step_x = (x as i32 - half_stride as i32) / stride as i32 - 1;
         let step_y = (y as i32 - half_stride as i32) / stride as i32 - 1;
 
@@ -136,15 +135,15 @@ pub fn image_to_mask(
         let y1 = if step_y < 0 { 0 } else { step_y as usize };
         let y2 = (1 + step_y) as usize;
 
-        let x_remainder = if x < half_stride {
+        let x_remainder = if x < half_stride as usize {
             0
         } else {
-            (x + half_stride) % stride
+            (x as u32 + half_stride) % stride
         };
-        let y_remainder = if y < half_stride {
+        let y_remainder = if y < half_stride as usize {
             0
         } else {
-            (y + half_stride) % stride
+            (y as u32 + half_stride) % stride
         };
 
         let part_x1 = (stride - x_remainder) as f32 / stride as f32;
@@ -156,15 +155,18 @@ pub fn image_to_mask(
         let mean_x2 = sig_map[x2][y1] * part_y1 + sig_map[x2][y2] * part_y2;
 
         let mean = mean_x1 * part_x1 + mean_x2 * part_x2;
-        mean
+
+        let result = if mean >= 0.8 { 1 } else { 0 };
+        result
     };
 
-    let output_img = ImageBuffer::from_fn(width as u32, height as u32, |x, y| {
-        let sig_val = mean_sig(x, y);
-        let shade_val: u8 = if sig_val >= 0.75 { 255 } else { 0 };
+    let mut mask: Vec<Vec<u8>> = vec![vec![0; height]; width];
+    for x in 0..width {
+        for y in 0..height {
+            let sig_val = mean_sig(x, y);
+            mask[x][y] = sig_val;
+        }
+    }
 
-        image::Rgb([shade_val, shade_val, shade_val])
-    });
-
-    DynamicImage::ImageRgb8(output_img)
+    mask
 }
