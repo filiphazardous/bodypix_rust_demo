@@ -9,6 +9,9 @@ You have to download and convert the body-pix model, and put it in the
  `assets/models` folder. Update the name of the model and the stride
  accordingly.
 
+Put an image called `test-image.jpg` in `assets/images` (or with some other
+ name - in which case you have to update the name).
+
 ### Getting the model
 [simple_bodypix_python](https://github.com/ajaichemmanam/simple_bodypix_python)
  has a script (`get-model.sh`) that is a good tool for downloading models.
