@@ -13,6 +13,7 @@ use dirs::picture_dir;
 use nannou::image::DynamicImage;
 use nannou::ui::widget::file_navigator::Types::WithExtension;
 use std::path::PathBuf;
+use std::time::Instant;
 
 fn main() {
     nannou::app(model).update(update).run();
@@ -188,18 +189,32 @@ fn update(app: &App, model: &mut Model, _update: Update) {
             .set(ids.process_image, ui)
             .was_clicked()
     {
+        let t = Instant::now();
+
         let mask = body_pix.as_ref().unwrap().process_image(
             selected_image.as_ref().unwrap(),
             InterpolationType::LinearMean,
         );
 
+        let t_delta_1 = t.elapsed().as_micros() as f32 / 1000.;
+        println!("Time to process: {}", t_delta_1);
+
         let mask_image = mask_to_image(&mask);
         let silhouette_image = create_silhouette(&mask, selected_image.as_ref().unwrap());
         let cutout_image = create_cutout(&mask, selected_image.as_ref().unwrap());
 
+        let t_delta_2 = t.elapsed().as_micros() as f32 / 1000. - t_delta_1;
+        println!("Time to create images: {}", t_delta_2);
+
         let mask_texture = Texture::from_image(app, &mask_image);
         let silhouette_texture = Texture::from_image(app, &silhouette_image);
         let cutout_texture = Texture::from_image(app, &cutout_image);
+
+        let t_delta_total = t.elapsed().as_micros() as f32 / 1000.;
+        let t_delta_3 = t_delta_total - t_delta_1 - t_delta_2;
+        println!("Time to create textures: {}", t_delta_3);
+
+        println!("Total time to process: {}", t_delta_total);
 
         model.textures = Some((mask_texture, silhouette_texture, cutout_texture));
     }

@@ -7,6 +7,7 @@ use tensorflow::{Graph, ImportGraphDefOptions, Session, SessionOptions, SessionR
 
 use nannou::image;
 use nannou::image::{DynamicImage, GenericImageView, Pixel};
+use std::time::Instant;
 
 #[derive(Clone, Copy)]
 pub enum ModelType {
@@ -97,7 +98,7 @@ impl BodyPix {
         sig_map[step_x][step_y]
     }
 
-    pub fn linar_mean(x: usize, y: usize, stride: u32, sig_map: &Vec<Vec<f32>>) -> f32 {
+    pub fn linear_mean(x: usize, y: usize, stride: u32, sig_map: &Vec<Vec<f32>>) -> f32 {
         let step_x = x / stride as usize;
         let step_y = y / stride as usize;
 
@@ -146,19 +147,12 @@ impl BodyPix {
         let img_width = image.width();
         let img_height = image.height();
 
+        // Nudge target width/height one step above stride (improves quality!)
         let target_width = img_width + 1;
         let target_height = img_height + 1;
 
-        // TODO: This resize is superfluous - it could just as well be done in the conversion loop
-        let input_image = image.resize_exact(target_width, target_height, image::imageops::Nearest);
-
-        let target_width = input_image.width();
-        let target_height = input_image.height();
-
-        println!(
-            "{}x{}: {}x{}",
-            img_height, img_width, target_height, target_width
-        );
+        let max_x = img_width - 1;
+        let max_y = img_height - 1;
 
         // Setup tensor args
         let vec_size = target_width * target_height * 3;
@@ -168,8 +162,7 @@ impl BodyPix {
             ModelType::MobileNet => {
                 for y in 0..target_height {
                     for x in 0..target_width {
-                        // TODO: If x == img_width, just get the pixel for (x-1) - and we've merged resize and flatten
-                        let pixel = input_image.get_pixel(x as u32, y as u32).to_rgb();
+                        let pixel = image.get_pixel(std::cmp::min(x, max_x), std::cmp::min(y, max_y)).to_rgb();
 
                         let red = pixel.0[0] as f32 / 127.5 - 1.;
                         let green = pixel.0[1] as f32 / 127.5 - 1.;
@@ -184,8 +177,7 @@ impl BodyPix {
             ModelType::ResNet => {
                 for y in 0..target_height {
                     for x in 0..target_width {
-                        // TODO: If x == img_width, just get the pixel for (x-1) - and we've merged resize and flatten
-                        let pixel = input_image.get_pixel(x as u32, y as u32).to_rgb();
+                        let pixel = image.get_pixel(std::cmp::min(x, max_x), std::cmp::min(y, max_y)).to_rgb();
 
                         let red = pixel.0[0] as f32 - 123.15;
                         let green = pixel.0[1] as f32 - 115.9;
@@ -205,10 +197,7 @@ impl BodyPix {
             .with_values(&flattened)
             .unwrap();
 
-        println!("Input Image Shape in hwc: {}", input.shape());
-        let width_resolution = (input.shape()[1].unwrap() - 1) as u32 / self.stride + 1;
-        let height_resolution = (input.shape()[0].unwrap() - 1) as u32 / self.stride + 1;
-        println!("Resolution: {} {}", width_resolution, height_resolution);
+        let t0 = Instant::now();
 
         let mut args: SessionRunArgs = SessionRunArgs::new();
         args.add_feed(
@@ -232,7 +221,8 @@ impl BodyPix {
         let segment_height = segments_res.shape().index(1).unwrap() as usize;
         let segment_width = segments_res.shape().index(2).unwrap() as usize;
 
-        println!("Segments shap: {:?}", segments_res.shape());
+        let elapsed = t0.elapsed().as_micros() as f32 / 1000.;
+        println!("Time elapsed for bodypix: {}", elapsed);
 
         let mut sig_map: Vec<Vec<f32>> = vec![vec![0f32; segment_height]; segment_width];
         for x in 0..segment_width {
@@ -242,14 +232,13 @@ impl BodyPix {
             }
         }
         let sig_map = sig_map;
-        println!("Sigmap: {},{}", sig_map.len(), sig_map[0].len());
 
         let mut mask: Vec<Vec<f32>> = vec![vec![0.; img_height as usize]; img_width as usize];
         match interpolation_type {
             InterpolationType::LinearMean => {
                 for x in 0..img_width {
                     for y in 0..img_height {
-                        let sig_val = BodyPix::linar_mean(x as usize, y as usize, self.stride, &sig_map);
+                        let sig_val = BodyPix::linear_mean(x as usize, y as usize, self.stride, &sig_map);
                         mask[x as usize][y as usize] = sig_val;
                     }
                 }
