@@ -15,6 +15,14 @@ The build-script depends on python3 and the package `tfjs_graph_converter`. It
 
 The build script will then download and convert the body-pix models
 
+## Platforms
+This should work on all major platforms, as long as you have Python 3 installed
+ for the build. However, I have only tried it on Linux - so feedback and
+ patches are welcome!
+
+## Contact
+Sending me a message on GitHub is probably the best way to get in touch
+
 ## Thanks
 A big shout-out to Ajai Chemmanam (ajaichemmanam on Github), and his
  simple_bodypix_python project. I owe my understanding of how to massage the
