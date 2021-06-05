@@ -192,8 +192,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
         let t = Instant::now();
 
         let mask = body_pix.as_ref().unwrap().process_image(
-            selected_image.as_ref().unwrap(),
-            InterpolationType::LinearMean,
+            selected_image.as_ref().unwrap()
         );
 
         let t_delta_1 = t.elapsed().as_micros() as f32 / 1000.;

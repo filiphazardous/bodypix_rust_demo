@@ -15,12 +15,6 @@ pub enum ModelType {
     ResNet,
 }
 
-#[derive(Clone, Copy)]
-pub enum InterpolationType {
-    LinearMean,
-    NoInterpolation,
-}
-
 pub struct BodyPix {
     graph: Graph,
     session: Session,
@@ -28,6 +22,89 @@ pub struct BodyPix {
     model_type: ModelType,
     // input_operations
     // output_operations
+}
+
+pub struct Segments {
+    pub orig_width: usize,
+    pub orig_height: usize,
+    width: usize,
+    height: usize,
+    stride: u32,
+    values: Vec<f32>,
+}
+
+impl Segments {
+    fn sigmoid(val: f32) -> f32 {
+        let neg_val = -val;
+        let denominator = 1. + neg_val.exp();
+        1. / denominator
+    }
+
+    pub fn from_tensor(stride: u32, orig_width: usize, orig_height: usize, t: &Tensor<f32>) -> Segments {
+        let height = t.shape().index(1).unwrap() as usize;
+        let width = t.shape().index(2).unwrap() as usize;
+
+        let mut values = vec![0f32; width * height];
+
+        // Is there a faster way to copy all the elements, and treat them? Or should we just move the sigmoid function to a shader and make one single copy?
+        for x in 0..width {
+            for y in 0..height {
+                let seg_val = t.get(&[0, y as u64, x as u64, 0]);
+                values[x + y * width] = Segments::sigmoid(seg_val);
+            }
+        }
+        let values = values;
+
+        Segments {
+            orig_width,
+            orig_height,
+            width,
+            height,
+            stride,
+            values,
+        }
+    }
+
+    pub fn no_interpolation(self: &Segments, x: usize, y: usize) -> f32 {
+        let step_x = 1 + x / self.stride as usize;
+        let step_y = 1 + y / self.stride as usize;
+        self.values[step_x + step_y * self.width]
+    }
+
+    pub fn linear_mean(self: &Segments, x: usize, y: usize) -> f32 {
+        let step_x = x / self.stride as usize;
+        let step_y = y / self.stride as usize;
+
+        let x1: usize = step_x;
+        let x2: usize = if x1 >= self.width - 1 {
+            x1
+        } else {
+            1 + step_x
+        };
+
+        let y1 = step_y;
+        let y2 = if y1 >= self.height - 1 {
+            y1
+        } else {
+            1 + step_y
+        };
+
+        let x_remainder = x as u32 % self.stride;
+        let y_remainder = y as u32 % self.stride;
+
+        let part_x1 = (self.stride - x_remainder) as f32 / self.stride as f32;
+        let part_x2 = 1. - part_x1;
+        let part_y1 = (self.stride - y_remainder) as f32 / self.stride as f32;
+        let part_y2 = 1. - part_y1;
+
+        let mean_x1 = self.values[x1 + y1 * self.width] * part_y1 + self.values[x1 + y2 * self.width] * part_y2;
+        let mean_x2 = self.values[x2 + y1 * self.width] * part_y1 + self.values[x2 + y2 * self.width] * part_y2;
+
+        let mean = mean_x1 * part_x1 + mean_x2 * part_x2;
+
+        mean
+    }
+
 }
 
 impl BodyPix {
@@ -92,71 +169,20 @@ impl BodyPix {
         }
     }
 
-    pub fn no_interpolation(x: usize, y: usize, stride: u32, sig_map: &Vec<Vec<f32>>) -> f32 {
-        let step_x = 1 + x / stride as usize;
-        let step_y = 1 + y / stride as usize;
-        sig_map[step_x][step_y]
-    }
-
-    pub fn linear_mean(x: usize, y: usize, stride: u32, sig_map: &Vec<Vec<f32>>) -> f32 {
-        let step_x = x / stride as usize;
-        let step_y = y / stride as usize;
-
-        let x1: usize = step_x;
-        let x2: usize = if x1 >= sig_map.len() - 1 {
-            x1
-        } else {
-            1 + step_x
-        };
-
-        let y1 = step_y;
-        let y2 = if y1 >= sig_map[x2].len() - 1 {
-            y1
-        } else {
-            1 + step_y
-        };
-
-        let x_remainder = x as u32 % stride;
-        let y_remainder = y as u32 % stride;
-
-        let part_x1 = (stride - x_remainder) as f32 / stride as f32;
-        let part_x2 = 1. - part_x1;
-        let part_y1 = (stride - y_remainder) as f32 / stride as f32;
-        let part_y2 = 1. - part_y1;
-
-        assert_ne!(x2, sig_map.len());
-        assert_ne!(y2, sig_map[x1].len());
-        assert_ne!(y2, sig_map[x2].len());
-
-        let mean_x1 = sig_map[x1][y1] * part_y1 + sig_map[x1][y2] * part_y2;
-        let mean_x2 = sig_map[x2][y1] * part_y1 + sig_map[x2][y2] * part_y2;
-
-        let mean = mean_x1 * part_x1 + mean_x2 * part_x2;
-
-        mean
-    }
-
-    pub fn process_image(&self, image: &DynamicImage, interpolation_type: InterpolationType) -> Vec<Vec<f32>> {
-        // TODO: Add mean-func as arg above (either blocky or mean)
-        fn sigmoid(val: f32) -> f32 {
-            let neg_val = -val;
-            let denominator = 1. + neg_val.exp();
-            1. / denominator
-        }
-
-        let img_width = image.width();
-        let img_height = image.height();
+    pub fn process_image(&self, image: &DynamicImage) -> Segments {
+        let orig_width = image.width();
+        let orig_height = image.height();
 
         // Nudge target width/height one step above stride (improves quality!)
-        let target_width = img_width + 1;
-        let target_height = img_height + 1;
+        let target_width = orig_width + 1;
+        let target_height = orig_height + 1;
 
-        let max_x = img_width - 1;
-        let max_y = img_height - 1;
+        let max_x = orig_width - 1;
+        let max_y = orig_height - 1;
 
         // Setup tensor args
         let vec_size = target_width * target_height * 3;
-        let mut flattened: Vec<f32> = Vec::with_capacity(vec_size as usize);
+        let mut flattened: Vec<f32> = Vec::with_capacity(vec_size as usize); // TODO: Maybe have a reusable buffer, instead of re-allocating every frame?
 
         match self.model_type {
             ModelType::MobileNet => {
@@ -197,8 +223,6 @@ impl BodyPix {
             .with_values(&flattened)
             .unwrap();
 
-        let t0 = Instant::now();
-
         let mut args: SessionRunArgs = SessionRunArgs::new();
         args.add_feed(
             &self.graph.operation_by_name_required("sub_2").unwrap(),
@@ -218,41 +242,8 @@ impl BodyPix {
 
         let segments_res: Tensor<f32> = args.fetch(segments_token).unwrap();
 
-        let segment_height = segments_res.shape().index(1).unwrap() as usize;
-        let segment_width = segments_res.shape().index(2).unwrap() as usize;
+        let segments = Segments::from_tensor(self.stride, orig_width as usize, orig_height as usize, &segments_res);
 
-        let elapsed = t0.elapsed().as_micros() as f32 / 1000.;
-        println!("Time elapsed for bodypix: {}", elapsed);
-
-        let mut sig_map: Vec<Vec<f32>> = vec![vec![0f32; segment_height]; segment_width];
-        for x in 0..segment_width {
-            for y in 0..segment_height {
-                let seg_val = segments_res.get(&[0, y as u64, x as u64, 0]);
-                sig_map[x][y] = sigmoid(seg_val);
-            }
-        }
-        let sig_map = sig_map;
-
-        let mut mask: Vec<Vec<f32>> = vec![vec![0.; img_height as usize]; img_width as usize];
-        match interpolation_type {
-            InterpolationType::LinearMean => {
-                for x in 0..img_width {
-                    for y in 0..img_height {
-                        let sig_val = BodyPix::linear_mean(x as usize, y as usize, self.stride, &sig_map);
-                        mask[x as usize][y as usize] = sig_val;
-                    }
-                }
-            }
-            InterpolationType::NoInterpolation => {
-                for x in 0..img_width {
-                    for y in 0..img_height {
-                        let sig_val = BodyPix::no_interpolation(x as usize, y as usize, self.stride, &sig_map);
-                        mask[x as usize][y as usize] = sig_val;
-                    }
-                }
-            }
-        }
-
-        mask
+        segments
     }
 }
